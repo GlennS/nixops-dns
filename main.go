@@ -32,10 +32,11 @@ func nixopsHostIp(deployment string, hostname string) (net.IP, error) {
 	row := nixopsStateDb.QueryRow(`
             SELECT RA.value AS ipv4
 	    FROM Resources R
-	    INNER JOIN ResourceAttrs RA ON RA.machine = R.id AND RA.name = 'privateIpv4'
+	    INNER JOIN ResourceAttrs RA ON RA.machine = R.id AND RA.name in ('publicIpv4', 'privateIpv4')
 	    INNER JOIN DeploymentAttrs DA ON DA.deployment = R.deployment AND DA.name = 'name'
 	    WHERE R.name = ?
-	    AND DA.value = ?;
+	    AND DA.value = ?
+            ORDER BY RA.name DESC;
     `, hostname, deployment)
 
 	if err := row.Scan(&ip); err != nil {
