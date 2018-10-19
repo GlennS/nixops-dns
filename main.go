@@ -27,15 +27,20 @@ func openNixopsStateDb() *sql.DB {
 	return db
 }
 
-func nixopsHostIp(hostname string) (net.IP, error) {
+func nixopsHostIp(deployment string, hostname string) (net.IP, error) {
 	var ip string
 	row := nixopsStateDb.QueryRow(`
-	  select ra.value from Resources r, ResourceAttrs ra
-	    where r.name = ? and r.id = ra.machine and ra.name = 'privateIpv4'
-    `, hostname)
+            SELECT RA.value AS ipv4
+	    FROM Resources R
+	    INNER JOIN ResourceAttrs RA ON RA.machine = R.id AND RA.name = 'privateIpv4'
+	    INNER JOIN DeploymentAttrs DA ON DA.deployment = R.deployment AND DA.name = 'name'
+	    WHERE R.name = ?
+	    AND DA.value = ?;
+    `, hostname, deployment)
+
 	if err := row.Scan(&ip); err != nil {
-		return nil, fmt.Errorf("Error while trying to find host '%s' in NixOps: %q",
-			hostname, err)
+		return nil, fmt.Errorf("Error while trying to find host '%s' in deployment '%s' in NixOps: %q",
+			hostname, deployment, err)
 	}
 	return net.ParseIP(ip), nil
 }
@@ -51,7 +56,19 @@ func domainHandler(domain string) func(dns.ResponseWriter, *dns.Msg) {
 			return
 		}
 
-		ip, err := nixopsHostIp(strings.TrimSuffix(q.Name, fmt.Sprintf("%s.", domain)))
+		var query []string = strings.Split(
+			strings.TrimSuffix(q.Name, fmt.Sprintf("%s.", domain)),
+			".")
+
+		if len(query) < 2 {
+			log.Println("Query should contain both a hostname and a deployment name.")
+			return
+		}
+
+		var hostname string = query[0]
+		var deployment string = strings.Join(query[1:], ".")
+
+		ip, err := nixopsHostIp(deployment, hostname)
 		if err != nil {
 			log.Println(err)
 			handleNotFound(w, r)
